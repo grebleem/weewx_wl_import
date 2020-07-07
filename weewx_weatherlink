@@ -284,8 +284,6 @@ def main():
         r = make_request_using_socket(url)
         weather_data = r
 
-        print(f"Fetching {timeset['st']} - {timeset['et']}")
-
         sensor_container = dict()
         full_davis_packet = dict()
         # Split sensor data
@@ -334,7 +332,7 @@ def main():
     current_path = os.getcwd()
 
     timestamp = int(time.time())
-    with open(f'{current_path}/tmp/davis{timestamp}.csv', 'w', newline='') as file:
+    with open(f'{current_path}/davis{timestamp}.csv', 'w', newline='') as file:
         # write first Line, and mapping in conf file
         writer = csv.writer(file)
         writer.writerow(wu_data[0].keys())
@@ -345,10 +343,10 @@ def main():
         for i in wu_data:
             writer.writerow(i.values())
 
-    if path.exists(f'{current_path}/tmp') is False:
-        os.makedirs(f'{current_path}/tmp')
+ #   if path.exists(f'{current_path}/tmp') is False:
+ #       os.makedirs(f'{current_path}/tmp')
 
-    config['CSV']['file'] = f'{current_path}/tmp/davis{timestamp}.csv'
+    config['CSV']['file'] = f'{current_path}/davis{timestamp}.csv'
     config.write()
 
     wee_import_str = f'{WEEWX_ROOT}/bin/wee_import --config={WEEWX_ROOT}/weewx.conf --import-config={current_path}/davis-csv.conf --verbose'
