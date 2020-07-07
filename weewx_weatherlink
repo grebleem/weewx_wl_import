@@ -1,0 +1,361 @@
+#!/usr/bin/env python
+import collections
+import hashlib
+import hmac
+import sys
+
+import argparse
+import configobj
+import time
+import datetime
+import csv
+
+from os import path
+
+import json
+import pprint
+import requests
+import os
+
+# from requests.exceptions import HTTPError
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+
+import pprint
+
+MM2INCH = 1 / 25.4
+_header_map = {
+                'ts': {'units': 'unix_epoch', 'map_to': 'dateTime'},
+                'arch_int': {'units': None, 'map_to': 'interval'},
+                'wind_dir_of_prevail': {'units': 'degree_compass', 'map_to': 'windDir'},
+                'temp_avg': {'units': 'degree_F', 'map_to': 'outTemp'},
+                'dew_point_last': {'units': 'degree_F', 'map_to': 'dewpoint'},
+                'heat_index_last': {'units': 'degree_F', 'map_to': 'heatindex'},
+                'wind_chill_last': {'units': 'degree_F', 'map_to': 'windchill'},
+                'bar_sea_level': {'units': 'inHg', 'map_to': 'altimeter'},
+                'bar_absolute': {'units': 'inHg', 'map_to': 'pressure'},
+                'temp_in_last': {'units': 'degree_F', 'map_to': 'inTemp'},
+                'dew_point_in': {'units': 'degree_F', 'map_to': 'inDewpoint'},
+                'hum_in_last': {'units': 'degree_F', 'map_to': 'inHumidity'},
+                'wind_dir_of_prevail': {'units': 'degree_compass', 'map_to': 'windDir'},
+                'wind_speed_avg': {'units': 'mile_per_hour', 'map_to': 'windSpeed'},
+                'wind_speed_hi': {'units': 'mile_per_hour', 'map_to': 'windGust'},
+                'wind_speed_hi_dir': {'units': 'mile_per_hour', 'map_to': 'windGustDir'},
+                'wind_run': {'units': 'mile', 'map_to': 'windrun'},
+                'hum_last': {'units': 'percent', 'map_to': 'outHumidity'},
+                'rainfall_in': {'units': 'inch', 'map_to': 'rain'},
+                'rain_rate_hi_in': {'units': 'inch_per_hour', 'map_to': 'rainRate'},
+                'solar_rad_avg': {'units': 'watt_per_meter_squared', 'map_to': 'radiation'},
+                'uv_index_avg': {'units': 'uv_index', 'map_to': 'UV'}
+               }
+
+DAY = 86400
+URL = 'https://api.weatherlink.com/v2'
+
+
+def sign_apisignature(parameters):
+    parameters = collections.OrderedDict(sorted(parameters.items()))
+    apiSecret = parameters["api-secret"]
+    parameters.pop("api-secret", None)
+
+    data = ""
+    for key in parameters:
+        data = data + key + str(parameters[key])
+
+    apiSignature = hmac.new(
+        apiSecret.encode('utf-8'),
+        data.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    return apiSignature
+
+
+def make_request_using_socket(url):
+    try:
+        retry_strategy = Retry(total=3, backoff_factor=1)
+
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        http = requests.Session()
+        http.mount("http://", adapter)
+
+        resp = http.get(url, timeout=3)
+
+        json_data = json.loads(resp.text)
+        if json_data is None:
+            print("HTTP error")
+        else:
+            if resp.status_code != 200:
+                print(f"error: {json_data.get('message')}")
+                exit()
+            else:
+                return (json_data)
+    except requests.Timeout as err:
+        print({"message": err})
+        exit()
+    except requests.RequestException as err:
+        # Max retries exceeded
+        print(f'RequestExeption: {err}')
+        exit()
+
+
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
+
+def valid_date(s):
+    try:
+        #return datetime.datetime.strptime(s, "%Y-%m-%d")
+        return datetime.datetime.fromisoformat(s)
+    except ValueError:
+        msg = "Not a valid date: '{0}'.".format(s)
+        raise argparse.ArgumentTypeError(msg)
+
+
+def sign(x):
+    if x > 0:
+        return 1.
+    elif x < 0:
+        return -1.
+    elif x == 0:
+        return 0.
+    else:
+        return x
+
+def main():
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-d", "--date", help="The Start Date - format YYYY-MM-DD", type=valid_date)
+
+    parser.add_argument('-s', "--startdate",
+                        help="The Start Date - format YYYY-MM-DD[THH:MM]",
+                        type=valid_date)
+
+    parser.add_argument('-e', "--enddate",
+                        help="The End Date format YYYY-MM-DD[THH:MM] (Inclusive)",
+                        type=valid_date)
+
+    args = parser.parse_args()
+
+    # One single day
+    if args.date:
+        print(f"Use date: {args.date}")
+        starttime_ts = int(args.date.timestamp())
+        endtime_ts = starttime_ts + DAY
+    elif args.startdate and args.enddate:
+        print(f"Use dates: {args.startdate} - {args.enddate}")
+        starttime_ts = int(args.startdate.timestamp())
+        endtime_ts = int(args.enddate.timestamp())
+    else:
+        print("No input date.")
+        exit()
+
+    # Read config File
+    config = configobj.ConfigObj('davis-csv.conf')
+
+    # clear FieldMap in conf file
+    for key in _header_map:
+        ##print(_header_map[key]['map_to'])
+        config['CSV']['FieldMap'][_header_map[key]['map_to']] = ''
+
+    API_KEY = config['weatherlink']['API_KEY']
+    API_SECRET = config['weatherlink']['API_SECRET']
+
+    WEEWX_ROOT = config['weatherlink']['WEEWX_ROOT']
+
+    parts = int((endtime_ts - starttime_ts) / DAY)
+
+    times = []
+    # In this example we are querying for data with timestamps greater than 2019-07-01 00:00:00 America/Los_Angeles and less than or equal to 2019-07-02 00:00:00 America/Los_Angeles.
+    # This is due to the fact that data record timestamps represent the end of the data record’s recording time interval.
+    # Therefore the record with the 2019-07-01 00:00:00 America/Los_Angeles timestamp is actually the last data record from 2019-06-30 America/Los_Angeles.
+
+    # Check length of timespan
+    if (endtime_ts - starttime_ts) <= DAY:
+        set = {'st': starttime_ts, 'et': endtime_ts}
+        print(f"{1} [{starttime_ts}] - [{endtime_ts}]: {datetime.datetime.fromtimestamp(starttime_ts)} - {datetime.datetime.fromtimestamp(endtime_ts)}")
+        times.append(set)
+    else:
+        i = 0
+        final_endtime_ts = endtime_ts
+        while i <= parts:
+            starttime_ts = starttime_ts + (DAY*sign(i))
+            if i == parts:
+                endtime_ts = final_endtime_ts
+            else:
+                endtime_ts = starttime_ts + DAY
+            set = {'st':int(starttime_ts), 'et':int(endtime_ts)}
+            print(f"{i+1} [{starttime_ts}] - [{endtime_ts}]: {datetime.datetime.fromtimestamp(starttime_ts)} - {datetime.datetime.fromtimestamp(endtime_ts)}")
+            times.append(set)
+            i += 1
+
+    parameters_no_station = {
+        "api-key": API_KEY,
+        "api-secret": API_SECRET,
+        "t": int(time.time())
+    }
+    signature = sign_apisignature(parameters_no_station)
+
+    if config['weatherlink']['station_id'] != 'default':
+        station_id = config['weatherlink']['station_id']
+
+    else:
+        print("Finding stations:\n")
+
+        url_stations = (f"{URL}/stations/?api-key={parameters_no_station['api-key']}&api-signature={signature}&t={parameters_no_station['t']}")
+
+        # Get Stations
+        r = requests.get(url_stations)
+        stations = r.json()
+
+        for station in stations['stations']:
+            print(f"station id: {station['station_id']}")
+            print(f"Name:       {station['station_name']}")
+            print(f"Country:    {station['country']}")
+            print(f"latitude:   {station['latitude']}")
+            print(f"longitude:  {station['longitude']}")
+            print("\n")
+            station_id = station['station_id']
+
+        if len(stations['stations']) > 1:
+            print("More than one station found, set station_id in davis-csv.conf")
+
+    print("  -- WARNING! --\n","Running WeeWX during a wee_import session can lead to abnormal termination of the import. \n",
+          "If WeeWX must remain running (e.g., so that live data is not lost) run the wee_import session on another machine\n",
+          "or to a second database and merge the in-use and second database once the import is complete.\n")
+    if query_yes_no("Is this correct?", None) is False:
+        exit()
+
+    # Get Sensors used in Station
+    # Sensor Catalog
+
+    url_sensor_catalog = (f"{URL}/sensor-catalog/?api-key={parameters_no_station['api-key']}&api-signature={signature}&t={parameters_no_station['t']}")
+    sensor_catalog = make_request_using_socket(url_sensor_catalog)
+
+    # initialise a list of dicts
+    wu_data = []
+
+
+    total_records = 0
+    for timeset in times:
+        parameters_range = {
+            "api-key": API_KEY,
+            "api-secret": API_SECRET,
+            "station-id": station_id,
+            "t": int(time.time()),
+            "start-timestamp": timeset['st'],
+            "end-timestamp": timeset['et']
+        }
+
+        signature = sign_apisignature(parameters_range)
+        print(f"Fetching {timeset['st']} - {timeset['et']}")
+        url = (
+            f"{URL}/historic/{station_id}?api-key={parameters_range['api-key']}&start-timestamp={parameters_range['start-timestamp']}&end-timestamp={parameters_range['end-timestamp']}&api-signature={signature}&t={parameters_range['t']}")
+
+        r = make_request_using_socket(url)
+        weather_data = r
+
+        print(f"Fetching {timeset['st']} - {timeset['et']}")
+
+        sensor_container = dict()
+        full_davis_packet = dict()
+        # Split sensor data
+        for sensor in weather_data['sensors']:
+            for sensor_type in sensor_catalog['sensor_types']:
+                if sensor_type.get('sensor_type') == sensor['sensor_type']:
+                    # print(sensor_type['product_name'])
+                    sensor_container[sensor['sensor_type']] = sensor_type
+
+        baro_data = weather_data['sensors'][0]['data']
+        iss_data = weather_data['sensors'][2]['data']
+        indoor_data = weather_data['sensors'][3]['data']
+
+        # Check Length of all data
+        if len(baro_data) == len(indoor_data) == len(iss_data):
+            total_records = total_records + len(iss_data)
+
+        i = 0
+        for iss_data, indoor_data, baro_data in zip(iss_data, indoor_data, baro_data):
+            if iss_data['ts'] == indoor_data['ts'] == baro_data['ts']:
+                full_davis_packet[i] = {**iss_data, **indoor_data, **baro_data}
+                i = i + 1
+
+
+        # first check we have some observational data
+        for record in full_davis_packet:
+            # initialise a dict to hold the resulting data for this record
+            _flat_record = {}
+            # iterate over each WU API response field that we can use
+            _fields = list(_header_map)
+            for obs in _fields:
+                if obs == 'arch_int':
+                    _flat_record[obs] = int(full_davis_packet[record][obs] / 60)
+                else:
+                    if full_davis_packet[record][obs] is None:
+                        _flat_record[obs] = 0
+                    else:
+                        _flat_record[obs] = full_davis_packet[record][obs]
+                    # if full_davis_packet[record].get(obs):
+                    #     print(obs)
+                    #     _flat_record[obs] = full_davis_packet[record][obs]
+                    _flat_record['usUnits'] = 1
+
+            wu_data.append(_flat_record)
+
+    current_path = os.getcwd()
+
+    timestamp = int(time.time())
+    with open(f'{current_path}/tmp/davis{timestamp}.csv', 'w', newline='') as file:
+        # write first Line, and mapping in conf file
+        writer = csv.writer(file)
+        writer.writerow(wu_data[0].keys())
+        for key in wu_data[0]:
+            if key != 'usUnits':
+                mapto = _header_map[key]['map_to']
+                config['CSV']['FieldMap'][mapto] = key
+        for i in wu_data:
+            writer.writerow(i.values())
+
+    if path.exists(f'{current_path}/tmp') is False:
+        os.makedirs(f'{current_path}/tmp')
+
+    config['CSV']['file'] = f'{current_path}/tmp/davis{timestamp}.csv'
+    config.write()
+
+    wee_import_str = f'{WEEWX_ROOT}/bin/wee_import --config={WEEWX_ROOT}/weewx.conf --import-config={current_path}/davis-csv.conf --verbose'
+    os.system(wee_import_str)
+
+
+# execute our main code
+if __name__ == "__main__":
+
+    main()
