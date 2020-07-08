@@ -264,7 +264,6 @@ def main():
     # initialise a list of dicts
     wu_data = []
 
-
     total_records = 0
     for timeset in times:
         parameters_range = {
@@ -281,6 +280,7 @@ def main():
         url = (
             f"{URL}/historic/{station_id}?api-key={parameters_range['api-key']}&start-timestamp={parameters_range['start-timestamp']}&end-timestamp={parameters_range['end-timestamp']}&api-signature={signature}&t={parameters_range['t']}")
 
+        print(url)
         r = make_request_using_socket(url)
         weather_data = r
 
