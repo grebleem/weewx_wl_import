@@ -280,7 +280,7 @@ def main():
         url = (
             f"{URL}/historic/{station_id}?api-key={parameters_range['api-key']}&start-timestamp={parameters_range['start-timestamp']}&end-timestamp={parameters_range['end-timestamp']}&api-signature={signature}&t={parameters_range['t']}")
 
-        print(url)
+        ## print(url)
         r = make_request_using_socket(url)
         weather_data = r
 
@@ -292,6 +292,12 @@ def main():
                 if sensor_type.get('sensor_type') == sensor['sensor_type']:
                     # print(sensor_type['product_name'])
                     sensor_container[sensor['sensor_type']] = sensor_type
+
+        print("The following sensors are found:")
+        for sensor in sensor_container:
+            print(f"Product name: {sensor_container[sensor]['product_name']}")
+            print(f"        category:    {sensor_container[sensor]['category']}")
+            print(f"        sensor type: {sensor_container[sensor]['sensor_type']}")
 
         baro_data = weather_data['sensors'][0]['data']
         iss_data = weather_data['sensors'][2]['data']
