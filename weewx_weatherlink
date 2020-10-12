@@ -199,7 +199,7 @@ def main():
     # This is due to the fact that data record timestamps represent the end of the data record’s recording time interval.
     # Therefore the record with the 2019-07-01 00:00:00 America/Los_Angeles timestamp is actually the last data record from 2019-06-30 America/Los_Angeles.
 
-    # Check length of timespan
+    # Check length of time span
     if (endtime_ts - starttime_ts) <= DAY:
         set = {'st': starttime_ts, 'et': endtime_ts}
         print(f"{1} [{starttime_ts}] - [{endtime_ts}]: {datetime.datetime.fromtimestamp(starttime_ts)} - {datetime.datetime.fromtimestamp(endtime_ts)}")
@@ -258,8 +258,18 @@ def main():
     # Get Sensors used in Station
     # Sensor Catalog
 
-    url_sensor_catalog = (f"{URL}/sensor-catalog/?api-key={parameters_no_station['api-key']}&api-signature={signature}&t={parameters_no_station['t']}")
-    sensor_catalog = make_request_using_socket(url_sensor_catalog)
+    try:
+        f = open("sensor_catalog.json")
+        sensor_catalog = json.load(f)
+        f.close()
+    except FileNotFoundError:
+        print("Sensor Catalog not found, downloading from Davis")
+        url_sensor_catalog = (f"{URL}/sensor-catalog/?api-key={parameters_no_station['api-key']}&api-signature={signature}&t={parameters_no_station['t']}")
+        sensor_catalog = make_request_using_socket(url_sensor_catalog)
+        with open('sensor_catalog.json', 'w') as json_file:
+            json.dump(sensor_catalog, json_file)
+            json_file.close()
+
 
     # initialise a list of dicts
     wu_data = []
@@ -286,22 +296,35 @@ def main():
 
         sensor_container = dict()
         full_davis_packet = dict()
+
+        #sensor1 = sensor_catalog.get()
         # Split sensor data
         for sensor in weather_data['sensors']:
             for sensor_type in sensor_catalog['sensor_types']:
                 if sensor_type.get('sensor_type') == sensor['sensor_type']:
                     # print(sensor_type['product_name'])
                     sensor_container[sensor['sensor_type']] = sensor_type
+                    sensor_container[sensor['sensor_type']]['data'] = sensor['data']
 
         print("The following sensors are found:")
         for sensor in sensor_container:
-            print(f"Product name: {sensor_container[sensor]['product_name']}")
-            print(f"        category:    {sensor_container[sensor]['category']}")
-            print(f"        sensor type: {sensor_container[sensor]['sensor_type']}")
+
+            print(f"\nmanufacturer: {sensor_container[sensor]['manufacturer']}")
+            # print(sensor_container[sensor]['sensor_type'])
+            print(f"Product Name: {sensor_container[sensor]['product_name']}")
+            print(f"Category:     {sensor_container[sensor]['category']}")
+            # for i in sensor_container[sensor]['data']:
+            #     if sensor_container[sensor]['data'][0] is not None:
+            #         if sensor_container[sensor]['data'][0][i] is not None:
+            #             print(i, end=' ')
+            # for i in sensor_container[sensor]['data'][0]:
+            #     if sensor_container[sensor]['data'][0][i] is not None:
+            #         print(i, end=' ')
+
 
         baro_data = weather_data['sensors'][0]['data']
-        iss_data = weather_data['sensors'][2]['data']
-        indoor_data = weather_data['sensors'][3]['data']
+        iss_data = weather_data['sensors'][4]['data']
+        indoor_data = weather_data['sensors'][5]['data']
 
         # Check Length of all data
         if len(baro_data) == len(indoor_data) == len(iss_data):
